@@ -20,9 +20,28 @@ var (
 )
 
 func saveHandler(w http.ResponseWriter, r *http.Request) {
-	//title := r.URL.Path[len("/save/"):]
-	//body := r.FormValue("body")
-	//http.Redirect(w, r, "/view/"+title, http.StatusFound)
+        r.ParseForm()
+
+	// Connect to etcd
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	cli, err := clientv3.New(clientv3.Config{
+		Endpoints:   []string{"192.168.50.1:2379"},
+		DialTimeout: dialTimeout,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer cli.Close()
+
+	// We want to deal in key values
+	kv := clientv3.NewKV(cli)
+
+	// Write a value
+	kv.Put(ctx, "/" + r.FormValue("short"), r.FormValue("url"))
+	cancel()
+	Info.Printf("Set value of /%s to %s", r.FormValue("short"),
+	            r.FormValue("url"))
+	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -40,17 +59,22 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	// We want to deal in key values
 	kv := clientv3.NewKV(cli)
 
-	// Write a value
-	//kv.Put(ctx, "/testing", "testing123")
-
 	switch r.URL.Path {
 	case "/":
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
 
 		fmt.Fprintf(w, "<h1>Write a new shortcut</h1>")
-		fmt.Fprintf(w, "<form action='save' method='post'>")
-		fmd.Fprintf(w, "</form\n\n")
+		fmt.Fprintf(w, "<form action='save' method='get'>")
+		fmt.Fprintf(w, "<table>")
+		fmt.Fprintf(w, "<tr><td>Short form:</td>")
+		fmt.Fprintf(w, "<td><input type='text' name='short'></td></tr>")
+		fmt.Fprintf(w, "<tr><td>URL:</td>")
+		fmt.Fprintf(w, "<td><input type='text' name='url'></td></tr>")
+		fmt.Fprintf(w, "<tr><td></td>")
+		fmt.Fprintf(w, "<td><input type='submit' value='Save'></td></tr>")
+		fmt.Fprintf(w, "</table>")
+		fmt.Fprintf(w, "</form\n\n")
 
 		fmt.Fprintf(w, "<h1>Currently saved URLs</h1><ul>")
 		resp, err := kv.Get(ctx, "", clientv3.WithPrefix())
@@ -65,9 +89,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "</ul>")
 
 	default:
-		w.Header().Set("Content-Type", "text/html")
-		w.WriteHeader(http.StatusOK)
-
 		resp, err := kv.Get(ctx, r.URL.Path, clientv3.WithPrefix())
 		cancel()
 		if err != nil {
@@ -77,8 +98,12 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		Info.Printf("Search for %s found %d results",
 			r.URL.Path, len(resp.Kvs))
 		if len(resp.Kvs) == 0 {
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusNotFound)
 			fmt.Fprintf(w, "Link not found")
 		} else {
+		        Info.Printf("Redirecting %s to %s", r.URL.Path,
+			            string(resp.Kvs[0].Value))
 			http.Redirect(w, r, string(resp.Kvs[0].Value),
 				http.StatusFound)
 		}
