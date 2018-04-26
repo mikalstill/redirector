@@ -37,7 +37,7 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	kv := clientv3.NewKV(cli)
 
 	// Write a value
-	kv.Delete(ctx, r.FormValue("short"))
+	kv.Delete(ctx, "redirector/" + r.FormValue("short"))
 	cancel()
 	Info.Printf("Deleted %s", r.FormValue("short"))
 	http.Redirect(w, r, "/", http.StatusFound)
@@ -61,7 +61,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	kv := clientv3.NewKV(cli)
 
 	// Write a value
-	kv.Put(ctx, "/"+r.FormValue("short"), r.FormValue("url"))
+	kv.Put(ctx, "redirector/" + r.FormValue("short"), r.FormValue("url"))
 	cancel()
 	Info.Printf("Set value of /%s to %s", r.FormValue("short"),
 		r.FormValue("url"))
@@ -101,21 +101,23 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "</form\n\n")
 
 		fmt.Fprintf(w, "<h1>Currently saved URLs</h1><ul>")
-		resp, err := kv.Get(ctx, "", clientv3.WithPrefix())
+		resp, err := kv.Get(ctx, "redirector", clientv3.WithPrefix())
 		cancel()
 		if err != nil {
 			log.Fatal(err)
 		}
 		for _, ev := range resp.Kvs {
+		        name := ev.Key[len("redirector/"):]
 			fmt.Fprintf(w, "<li><a href=\"%s\">%s</a>: %s",
-				ev.Key, ev.Key, ev.Value)
+				name, name, ev.Value)
 			fmt.Fprintf(w, "<form><input type='button' value='delete' onclick=\"window.location.href='/delete?short=%s'\" /></form>",
-				string(ev.Key))
+				string(name))
 		}
 		fmt.Fprintf(w, "</ul>")
 
 	default:
-		resp, err := kv.Get(ctx, r.URL.Path, clientv3.WithPrefix())
+		resp, err := kv.Get(ctx, "redirector" + r.URL.Path,
+		                    clientv3.WithPrefix())
 		cancel()
 		if err != nil {
 			log.Fatal(err)
@@ -141,7 +143,7 @@ func main() {
 		log.Ldate|log.Ltime|log.Lshortfile)
 
 	http.HandleFunc("/delete", deleteHandler)
-	http.HandleFunc("/save", saveHandler)
+	http.HandleFunc("/save/", saveHandler)
 	http.HandleFunc("/", handler)
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
