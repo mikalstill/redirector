@@ -19,8 +19,8 @@ var (
 	Info *log.Logger
 )
 
-func saveHandler(w http.ResponseWriter, r *http.Request) {
-        r.ParseForm()
+func deleteHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
 
 	// Connect to etcd
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
@@ -37,10 +37,34 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	kv := clientv3.NewKV(cli)
 
 	// Write a value
-	kv.Put(ctx, "/" + r.FormValue("short"), r.FormValue("url"))
+	kv.Delete(ctx, r.FormValue("short"))
+	cancel()
+	Info.Printf("Deleted %s", r.FormValue("short"))
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+func saveHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+
+	// Connect to etcd
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	cli, err := clientv3.New(clientv3.Config{
+		Endpoints:   []string{"192.168.50.1:2379"},
+		DialTimeout: dialTimeout,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer cli.Close()
+
+	// We want to deal in key values
+	kv := clientv3.NewKV(cli)
+
+	// Write a value
+	kv.Put(ctx, "/"+r.FormValue("short"), r.FormValue("url"))
 	cancel()
 	Info.Printf("Set value of /%s to %s", r.FormValue("short"),
-	            r.FormValue("url"))
+		r.FormValue("url"))
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -83,8 +107,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			log.Fatal(err)
 		}
 		for _, ev := range resp.Kvs {
-			fmt.Fprintf(w, "<li><a href=\"%s\">%s</a>: %s\n",
+			fmt.Fprintf(w, "<li><a href=\"%s\">%s</a>: %s",
 				ev.Key, ev.Key, ev.Value)
+			fmt.Fprintf(w, "<form><input type='button' value='delete' onclick=\"window.location.href='/delete?short=%s'\" /></form>",
+				string(ev.Key))
 		}
 		fmt.Fprintf(w, "</ul>")
 
@@ -102,8 +128,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 			fmt.Fprintf(w, "Link not found")
 		} else {
-		        Info.Printf("Redirecting %s to %s", r.URL.Path,
-			            string(resp.Kvs[0].Value))
+			Info.Printf("Redirecting %s to %s", r.URL.Path,
+				string(resp.Kvs[0].Value))
 			http.Redirect(w, r, string(resp.Kvs[0].Value),
 				http.StatusFound)
 		}
@@ -114,7 +140,8 @@ func main() {
 	Info = log.New(os.Stdout, "INFO: ",
 		log.Ldate|log.Ltime|log.Lshortfile)
 
-	http.HandleFunc("/save/", saveHandler)
+	http.HandleFunc("/delete", deleteHandler)
+	http.HandleFunc("/save", saveHandler)
 	http.HandleFunc("/", handler)
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
